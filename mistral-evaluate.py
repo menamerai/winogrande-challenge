@@ -1,4 +1,3 @@
-import threading
 import re
 import pandas as pd
 from typing import Dict
@@ -11,53 +10,46 @@ dataset = load_dataset("winogrande", "winogrande_debiased")
 train_dataset = dataset["train"]
 val_dataset = dataset["validation"]
 test_dataset = dataset["test"]
-llm = Ollama(model="mistral", temperature=0.3)
+llm = Ollama(model="mistral", temperature=0.8, top_p=0.9, top_k=0)
 
 
 def infer(prompt: str, option1: str, option2: str, correct: str) -> Dict:
-    # three-shot prompt
-    # examples are from the train set
-    # the model will never see these examples during validation
+    # chain-of-thought prompt
     winogrande_prompt = PromptTemplate.from_template(
         """
-        Sentence: "Emily was thrown out of the court for the lawsuit against Carrie because _ was the only one acting disruptively."
-        Option 1: Emily
-        Option 2: Carrie
-        Answer: Option 1.
-
-        Sentence: "The shop owner said that Sarah purchased several pieces of furniture unlike Rachel, due to _ being poor."
-        Option 1: Sarah
-        Option 2: Rachel
-        Answer: Option 2.
-
-        Sentence: "Neil told Craig that he has to take care of the child for the day because _ promised to do so."
-        Option 1: Neil
-        Option 2: Craig
-        Answer: Option 2.
-
-        Sentence: "{prompt}"
-        Option 1: {option1}
-        Option 2: {option2}
-        Answer: 
+        John moved the couch from the garage to the backyard to create space. The _ is small. "garage" or "backyard"?
+        A: The question is asking about whether the garage or the backyard is small. The couch was moved from the garage to make space, so the garage is small. The answer is "garage".
+        The doctor diagnosed Justin with bipolar and Robert with anxiety. _ had terrible nerves recently. "Justin" or "Robert"?
+        A: The question is asking about who has terrible nerves. Robert was diagnosed with anxiety, which has symptoms of nervousness. The answer is "Robert".
+        Dennis drew up a business proposal to present to Logan because _ wants his investment. "Dennis" or "Logan"?
+        A: The question is asking about who wants the investment. Dennis drew up the business proposal, so he wants the investment. The answer is "Dennis".
+        Felicia unexpectedly made fried eggs for breakfast in the morning for Katrina and now _ owes a favor. "Felicia" or "Katrina"?
+        A: The question is asking about who owes a favor. Katrina received Felicia's breakfast, but hasn't done anything in return, so she owes a favor. The answer is "Katrina".
+        My shampoo did not lather easily on my Afro hair because the _ is too dirty. "shampoo" or "hair"?
+        A: The question is asking about what is dirty. The shampoo did not lather easily because dirty hair is hard to apply shampoo on. The answer is "hair".
+        {prompt} "{option1}" or "{option2}"?
+        A: 
         """
     )
     prompt_filled = winogrande_prompt.format(prompt=prompt, option1=option1, option2=option2)
     model_output = llm(prompt_filled)
-    option1_regex = "{}".format(option1)
-    option2_regex = "{}".format(option2)
-    if re.match(r"Option 1", model_output, re.IGNORECASE) or re.match(option1_regex, model_output, re.IGNORECASE):
+    stripped = str(model_output).strip()
+    option1_regex = f"The answer is \"{option1}\""
+    option2_regex = f"The answer is \"{option2}\""
+    if re.search(option1_regex, stripped, re.IGNORECASE):
         answer = "1"
-    elif re.match(r"Option 2", model_output, re.IGNORECASE) or re.match(option2_regex, model_output, re.IGNORECASE):
+    elif re.search(option2_regex, stripped, re.IGNORECASE):
         answer = "2"
     else:
+        print(f"[ERROR]: {stripped}")
         answer = "0"
-    correct = "1" if correct == "1" else "2"
 
     output_dict = {
         "prompt": prompt,
         "option1": option1,
         "option2": option2,
         "model_output": model_output,
+        "stripped": stripped,
         "answer": answer,
         "correct": correct,
         "correctness": answer == correct,
@@ -67,22 +59,14 @@ def infer(prompt: str, option1: str, option2: str, correct: str) -> Dict:
 if __name__ == "__main__":
     # use threading to speed up inference
     answers = []
-    threads = []
     for idx in tqdm(range(10)):
         # replace all "_" with "[BLANK]"
-        prompt = val_dataset["sentence"][idx].replace("_", "[BLANK]")
+        prompt = val_dataset["sentence"][idx]
         option1 = val_dataset["option1"][idx]
         option2 = val_dataset["option2"][idx]
         correct_ans = val_dataset["answer"][idx]
         # print(f"[MAIN]: create and start thread {idx}")
-        t = threading.Thread(target=lambda: answers.append(infer(prompt, option1, option2, correct_ans)))
-        threads.append(t)
-        t.start()
-        
-    for idx, t in enumerate(tqdm(threads)):
-        # print(f"[MAIN]: join thread {idx}")
-        t.join()
-        # print(f"[MAIN]: thread {idx} joined")
+        answers.append(infer(prompt, option1, option2, correct_ans))
 
 
     # get average correctness
