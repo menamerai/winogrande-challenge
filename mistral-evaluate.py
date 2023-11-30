@@ -76,5 +76,9 @@ if __name__ == "__main__":
 
     # save answers to csv with pandas
     output_df = pd.DataFrame.from_records(answers)
-    output_df.to_csv("./output/{}-evaluate-{}.csv".format(model, len(answers)), index=False)
+    output_df.to_csv("./output/{}-{}-sample-{}-accuracy.csv".format(
+        model, 
+        len(answers), 
+        sum(correctness) / len(correctness)
+    ), index=False)
         
