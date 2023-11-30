@@ -7,17 +7,38 @@ from langchain.prompts import PromptTemplate
 from langchain.llms import Ollama
 from tqdm import tqdm
 
-dataset = load_dataset("winogrande", "winogrande_debiased", split="train")
-llm = Ollama(model="llama2-uncensored")
+dataset = load_dataset("winogrande", "winogrande_debiased")
+train_dataset = dataset["train"]
+val_dataset = dataset["validation"]
+test_dataset = dataset["test"]
+llm = Ollama(model="mistral", temperature=0.3)
 
 
 def infer(prompt: str, option1: str, option2: str, correct: str) -> Dict:
+    # three-shot prompt
+    # examples are from the train set
+    # the model will never see these examples during validation
     winogrande_prompt = PromptTemplate.from_template(
         """
-        Fill in the [BLANK] using the option that make the most logical meaning: "{prompt}"
+        Sentence: "Emily was thrown out of the court for the lawsuit against Carrie because _ was the only one acting disruptively."
+        Option 1: Emily
+        Option 2: Carrie
+        Answer: Option 1.
+
+        Sentence: "The shop owner said that Sarah purchased several pieces of furniture unlike Rachel, due to _ being poor."
+        Option 1: Sarah
+        Option 2: Rachel
+        Answer: Option 2.
+
+        Sentence: "Neil told Craig that he has to take care of the child for the day because _ promised to do so."
+        Option 1: Neil
+        Option 2: Craig
+        Answer: Option 2.
+
+        Sentence: "{prompt}"
         Option 1: {option1}
         Option 2: {option2}
-        Answer only Option 1 or Option 2:
+        Answer: 
         """
     )
     prompt_filled = winogrande_prompt.format(prompt=prompt, option1=option1, option2=option2)
@@ -47,12 +68,12 @@ if __name__ == "__main__":
     # use threading to speed up inference
     answers = []
     threads = []
-    for idx in tqdm(range(100)):
+    for idx in tqdm(range(10)):
         # replace all "_" with "[BLANK]"
-        prompt = dataset["sentence"][idx].replace("_", "[BLANK]")
-        option1 = dataset["option1"][idx]
-        option2 = dataset["option2"][idx]
-        correct_ans = dataset["answer"][idx]
+        prompt = val_dataset["sentence"][idx].replace("_", "[BLANK]")
+        option1 = val_dataset["option1"][idx]
+        option2 = val_dataset["option2"][idx]
+        correct_ans = val_dataset["answer"][idx]
         # print(f"[MAIN]: create and start thread {idx}")
         t = threading.Thread(target=lambda: answers.append(infer(prompt, option1, option2, correct_ans)))
         threads.append(t)
@@ -70,5 +91,5 @@ if __name__ == "__main__":
 
     # save answers to csv with pandas
     output_df = pd.DataFrame.from_records(answers)
-    output_df.to_csv("./output/llama2-evaluate-100.csv", index=False)
+    output_df.to_csv("./output/mistral-evaluate-{}.csv".format(len(answers)), index=False)
         
